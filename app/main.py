@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from google.cloud import texttospeech
 
-from modern_sdr_agent.agent import root_agent  # update this import path as needed
+from Agents.agent import root_agent  # update this import path as needed
 
 # Load environment
 load_dotenv()
