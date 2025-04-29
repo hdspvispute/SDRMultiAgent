@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Sales Assistant</title>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    body { font-family: 'Roboto', sans-serif; background-color: #f9fafb; color: #111827; margin: 0; padding: 40px; }
+    h1 { text-align: center; font-size: 28px; font-weight: 600; color: #1f2937; margin-bottom: 30px; }
+    #messages { height: 300px; overflow-y: auto; border: 1px solid #d1d5db; padding: 15px; border-radius: 8px; background-color: #ffffff; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); font-size: 15px; line-height: 1.5; }
+    form { margin-top: 20px; display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; }
+    input[type="text"] { padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; width: 60%; font-size: 14px; }
+    button { padding: 10px 20px; font-size: 14px; border-radius: 6px; border: none; cursor: pointer; transition: background-color 0.2s ease-in-out; }
+    #sendButton { background-color: #2563eb; color: #ffffff; }
+    #sendButton:disabled { background-color: #9ca3af; cursor: not-allowed; }
+    #sendButton:hover:not(:disabled) { background-color: #1e40af; }
+    #voiceButton { background-color: #10b981; color: white; }
+    #voiceButton:hover { background-color: #059669; }
+    label { font-weight: 500; }
+    p { margin: 8px 0; }
+    #doorOptions { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; }
+    .door-option { width: 250px; background-color: #ffffff; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1); border-radius: 12px; overflow: hidden; text-align: center; transition: transform 0.3s ease, box-shadow 0.3s ease; }
+    .door-option:hover { transform: translateY(-6px); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2); }
+    .door-option img { width: 100%; height: 180px; object-fit: cover; }
+    .door-option strong { display: block; padding: 12px; font-size: 16px; color: #1f2937; }
+    #mapContainer, #doorOptionsContainer { margin-top: 20px; display: none; }
+    
+  </style>
+</head>
+<body>
+
+<h1>AI Sales Assistant</h1>
+
+<div id="messages"></div>
+
+<div id="doorOptionsContainer" style="display: none;">
+  <h3 style="text-align: center;">🚪 Recommended Garage Doors</h3>
+  <div id="doorOptions"></div>
+</div>
+
+<div id="mapContainer" style="display: none;">
+  <h3>📍 Nearby Garage Door Dealers</h3>
+  <iframe id="mapIframe" width="100%" height="300" style="border:0" loading="lazy" allowfullscreen referrerpolicy="no-referrer-when-downgrade"></iframe>
+</div>
+
+
+
+<form id="messageForm">
+  <label for="message">Your Message:</label>
+  <input type="text" id="message" name="message" placeholder="Type or speak your question..." />
+  <button type="submit" id="sendButton" disabled>Send</button>
+  <button type="button" id="voiceButton" title="Speak your message">🎤</button>
+</form>
+
+<script>
+// JavaScript to enable WebSocket, send button, voice recording, TTS, and map/door options.
+const sessionId = Math.random().toString().substring(10);
+const ws_url = "ws://" + window.location.host + "/ws/" + sessionId;
+let ws = new WebSocket(ws_url);
+
+const messageForm = document.getElementById("messageForm");
+const messageInput = document.getElementById("message");
+const messagesDiv = document.getElementById("messages");
+const mapContainer = document.getElementById("mapContainer");
+const mapIframe = document.getElementById("mapIframe");
+const doorOptionsContainer = document.getElementById("doorOptionsContainer");
+const doorOptionsDiv = document.getElementById("doorOptions");
+const voiceButton = document.getElementById("voiceButton");
+let currentAudio = null;
+let latestZip = null;
+let budgetGiven = false;
+
+const doorImages = {
+  "Classic Steel": { img: "static\\ClassicDoor.png", link: "https://example.com/classic" },
+  "Gallery Steel": { img: "static\\GalleryDoor.png", link: "https://example.com/gallery" },
+  "Modern Steel": { img: "static\\ModernDoor.png", link: "https://example.com/modern" },
+};
+
+function addWebSocketHandlers(ws) {
+  ws.onopen = function () {
+    console.log("✅ WebSocket connection opened.");
+    document.getElementById("sendButton").disabled = false;
+    messagesDiv.textContent = "✅ Connected to AI Sales Assistant.";
+    addSubmitHandler(this);
+  };
+
+  ws.onmessage = function (event) {
+    const packet = JSON.parse(event.data);
+    if (!window.fullAssistantMessage) window.fullAssistantMessage = "";
+
+    if (packet.message && !packet.from_user) {
+      window.fullAssistantMessage += packet.message;
+    }
+
+    if (packet.turn_complete && window.fullAssistantMessage) {
+      const message = document.createElement("p");
+      message.textContent = "🤖 Assistant: " + window.fullAssistantMessage;
+      messagesDiv.appendChild(message);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      speakWithGoogleTTS(window.fullAssistantMessage);
+
+      const fullText = window.fullAssistantMessage.toLowerCase();
+      if (fullText.includes("$") || fullText.includes("budget")) budgetGiven = true;
+
+      if (budgetGiven && (fullText.includes("classic") || fullText.includes("gallery") || fullText.includes("modern"))) {
+        showDoorOptions(fullText);
+      }
+
+      if (fullText.includes("speak with") ) {
+        const zip = latestZip;
+        mapIframe.src = `https://www.google.com/maps?q=garage+door+dealers+in+${zip}&output=embed`;
+        mapContainer.style.display = "block";
+      }
+      window.fullAssistantMessage = "";
+    }
+  };
+
+  ws.onclose = function () {
+    console.log("❌ WebSocket connection closed.");
+    document.getElementById("sendButton").disabled = true;
+    messagesDiv.textContent = "⚠️ Connection lost. Please refresh page to reconnect.";
+  };
+
+  ws.onerror = function (e) {
+    console.log("WebSocket error: ", e);
+  };
+}
+
+function addSubmitHandler(ws) {
+  messageForm.onsubmit = function (e) {
+    e.preventDefault();
+    const message = messageInput.value;
+    if (message) {
+      const p = document.createElement("p");
+      p.textContent = "🧑 You: " + message;
+      messagesDiv.appendChild(p);
+
+      const zipMatch = message.match(/\b\d{5}\b/);
+      if (zipMatch) {
+        latestZip = zipMatch[0];
+      }
+
+      ws.send(message);
+      messageInput.value = "";
+    }
+    return false;
+  };
+}
+
+async function speakWithGoogleTTS(text) {
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio = null;
+  }
+
+  const response = await fetch("/tts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text })
+  });
+
+  if (!response.ok) {
+    console.error("TTS request failed");
+    return;
+  }
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  currentAudio = new Audio(url);
+  currentAudio.play();
+}
+
+function showDoorOptions(text) {
+  doorOptionsDiv.innerHTML = "";
+  doorOptionsContainer.style.display = "block";
+  for (const [name, data] of Object.entries(doorImages)) {
+     {
+      const div = document.createElement("div");
+      div.className = "door-option";
+      div.innerHTML = `<img src="${data.img}" alt="${name}" /><strong>${name}</strong><a href="${data.link}" target="_blank" style="display:block;margin:8px auto 12px;padding:8px 12px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px;width:80%;">Learn More</a>`;
+      doorOptionsDiv.appendChild(div);
+    }
+  }
+}
+
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (SpeechRecognition) {
+  const recognition = new SpeechRecognition();
+  recognition.continuous = false;
+  recognition.lang = "en-US";
+  recognition.interimResults = false;
+
+  voiceButton.onmousedown = () => {
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio = null;
+    }
+    recognition.start();
+    voiceButton.textContent = "🎙️ Recording...";
+  };
+
+  voiceButton.onmouseup = () => {
+    recognition.stop();
+    voiceButton.textContent = "🎤";
+  };
+
+  recognition.onresult = function (event) {
+    const transcript = event.results[0][0].transcript;
+    messageInput.value = transcript;
+    if (transcript.trim()) {
+      const p = document.createElement("p");
+      p.textContent = "🧑 You: " + transcript;
+      messagesDiv.appendChild(p);
+
+      const zipMatch = transcript.match(/\b\d{5}\b/);
+      if (zipMatch) {
+        latestZip = zipMatch[0];
+      }
+
+      ws.send(transcript);
+      messageInput.value = "";
+    }
+  };
+
+  recognition.onerror = function (event) {
+    console.error("Voice recognition error", event.error);
+    voiceButton.textContent = "🎤";
+  };
+
+  recognition.onend = () => {
+    voiceButton.textContent = "🎤";
+  };
+} else {
+  voiceButton.disabled = true;
+  voiceButton.title = "Voice input not supported in this browser";
+}
+
+addWebSocketHandlers(ws);
+</script>
+
+</body>
+</html>
